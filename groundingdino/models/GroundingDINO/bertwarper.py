@@ -5,6 +5,8 @@
 # Licensed under the Apache License, Version 2.0 [see LICENSE for details]
 # ------------------------------------------------------------------------
 
+import inspect
+
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
@@ -24,9 +26,30 @@ class BertModelWarper(nn.Module):
         self.encoder = bert_model.encoder
         self.pooler = bert_model.pooler
 
-        self.get_extended_attention_mask = bert_model.get_extended_attention_mask
+        # In transformers v5, get_extended_attention_mask changed its 3rd param
+        # from `device` to `dtype`. Detect which signature we have and wrap if needed.
+        _orig_get_ext = bert_model.get_extended_attention_mask
+        _params = list(inspect.signature(_orig_get_ext).parameters.keys())
+        if len(_params) >= 3 and _params[2] == "dtype":
+            # transformers >= 5: 3rd arg is dtype, not device — drop device arg
+            def _get_extended_attention_mask_compat(attention_mask, input_shape, device=None):
+                return _orig_get_ext(attention_mask, input_shape)
+            self.get_extended_attention_mask = _get_extended_attention_mask_compat
+        else:
+            self.get_extended_attention_mask = _orig_get_ext
+
         self.invert_attention_mask = bert_model.invert_attention_mask
-        self.get_head_mask = bert_model.get_head_mask
+        # get_head_mask was removed in transformers v5 — provide a compatible fallback
+        if hasattr(bert_model, "get_head_mask"):
+            self.get_head_mask = bert_model.get_head_mask
+        else:
+            self.get_head_mask = self._get_head_mask_fallback
+
+    @staticmethod
+    def _get_head_mask_fallback(head_mask, num_hidden_layers, is_attention_chunked=False):
+        if head_mask is not None:
+            raise NotImplementedError("head_mask pruning is not supported with transformers >= 5")
+        return [None] * num_hidden_layers
 
     def forward(
         self,
