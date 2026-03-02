@@ -2,6 +2,12 @@
 .idea/
 .vscode/
 
+# uv (lock managed by workspace root)
+uv.lock
+
+# Model checkpoints
+gdino_checkpoints/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
